@@ -1,7 +1,10 @@
 from chromadb import PersistentClient
 
-# Connect to your Chroma DB (same path as in config.py)
-client = PersistentClient(path="./chroma_db")
+# Connect to your Chroma DB using absolute path
+import os
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+CHROMA_PATH = os.path.join(BASE_DIR, "chroma_db")
+client = PersistentClient(path=CHROMA_PATH)
 
 # List collections
 collections = client.list_collections()

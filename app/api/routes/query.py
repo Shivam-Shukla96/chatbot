@@ -1,7 +1,7 @@
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 from app.services.vector_store import search_similar
-from app.services.synthesis import summarize_themes
+# from app.services.synthesis import summarize_themes
 from typing import Optional
 import os
 from dotenv import load_dotenv
@@ -35,9 +35,27 @@ def ask_question(q: str, source: Optional[str] = None):
             )
         print(f"Results---: {results}")
 
-        summary = summarize_themes(results)
+        
+        # After getting results
+        context = "\n".join([r["content"] for r in results])
+        completion = client.chat.completions.create(
+            model="gpt-4o-mini",   # or gpt-4-turbo / gpt-3.5-turbo
+            messages=[
+                {"role": "system", "content": "You are a helpful assistant. Answer the question based only on the provided context."},
+                {"role": "user", "content": f"Question: {q}\n\nContext:\n{context}"}
+            ],
+            temperature=0.3
+        )
+        summary = completion.choices[0].message.content
+
+        # Pass both results and original query for context-aware summarization
+        # summary = summarize_themes(results, query=q)
         print(f"Summary:>> {summary}")
-        return {"question": q, "answer": summary}
+        return {
+            "question": q,
+            "answer": summary,
+            "sources": [{"source": r["meta"]["source"], "similarity": r["meta"].get("similarity", 0)} for r in results]
+        }
     except Exception as ex:
         return JSONResponse(
             status_code=500,
