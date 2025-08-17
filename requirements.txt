@@ -1,0 +1,13 @@
+fastapi
+uvicorn[standard]
+pytesseract
+pdf2image
+PyPDF2
+Pillow
+transformers
+sentence-transformers
+chromadb
+python-dotenv
+poppler-utils
+httpx
+python-multipart
