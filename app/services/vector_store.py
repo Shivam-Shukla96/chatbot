@@ -1,233 +1,234 @@
 """
 vector_store.py
 
-This module handles storage and retrieval of text embeddings using ChromaDB and SentenceTransformers.
+This module handles storage and retrieval of text embeddings using ChromaDB and OpenAI.
 It supports storing document chunks along with metadata and querying the most semantically similar content.
-
-Dependencies:
-- chromadb
-- sentence-transformers
-
 """
 
-import chromadb
-# from chromadb.config import Settings  # Removed unused import
-from sentence_transformers import SentenceTransformer
-
-# Initialize ChromaDB persistent client and sentence embedding model
 import os
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-CHROMA_PATH = os.path.join(BASE_DIR, "chroma_db")
-client = chromadb.PersistentClient(path=CHROMA_PATH)
-collection = client.get_or_create_collection(name="docs")
-model = SentenceTransformer("all-MiniLM-L6-v2")
+import logging
+import chromadb
+from openai import OpenAI
+from typing import List, Dict, Any, Optional, Union
+from concurrent.futures import ThreadPoolExecutor
+import numpy as np
+from app.core.config import settings
+from dotenv import load_dotenv
 
+# Load environment variables
+load_dotenv()
 
-def store_text_chunks(chunks):
+# Get OpenAI API key
+api_key = os.getenv("OPENAI_API_KEY")
+if not api_key:
+    raise ValueError("OPENAI_API_KEY environment variable is not set")
+
+# Configure logging
+logger = logging.getLogger(__name__)
+
+def initialize_vector_store():
+    """Initialize ChromaDB client with error handling"""
+    try:
+        # Ensure directory exists
+        os.makedirs(settings.CHROMA_DB_PATH, exist_ok=True)
+        
+        # Initialize ChromaDB
+        client = chromadb.PersistentClient(path=str(settings.CHROMA_DB_PATH))
+        collection = client.get_or_create_collection(
+            name="docs",
+            metadata={"hnsw:space": "cosine"}  # Use cosine similarity
+        )
+        
+        logger.info(f"Successfully initialized ChromaDB at {settings.CHROMA_DB_PATH}")
+        
+        return client, collection
+    except Exception as e:
+        logger.error(f"Error initializing vector store: {str(e)}")
+        raise
+
+# Initialize components
+client, collection = initialize_vector_store()
+
+Embedding = List[float]
+
+def get_embeddings(texts: List[str]) -> List[List[float]]:
+    """Get embeddings using OpenAI's API"""
+    try:
+        if not texts:
+            return []
+            
+        # Handle single string input
+        if isinstance(texts, str):
+            texts = [texts]
+            
+        # Clean and validate inputs
+        validated_texts = [str(text).strip() for text in texts]
+        if not any(validated_texts):
+            logger.warning("No valid text to embed after cleaning")
+            return []
+            
+        # Create OpenAI client
+        if not api_key:
+            raise ValueError("OpenAI API key is not set")
+        client = OpenAI(api_key=api_key)
+            
+        # Get embeddings from OpenAI
+        response = client.embeddings.create(
+            model="text-embedding-ada-002",
+            input=validated_texts
+        )
+        # Extract embeddings from response
+        embeddings = [data.embedding for data in response.data]
+        return embeddings
+    except Exception as e:
+        logger.error(f"Error getting embeddings from OpenAI: {str(e)}")
+        raise
+
+def batch_encode(texts: List[str]) -> List[List[float]]:
+    """
+    Encode a batch of texts using OpenAI embeddings API
+    
+    Args:
+        texts (List[str]): List of text strings to encode
+        
+    Returns:
+        List[List[float]]: List of embeddings
+    """
+    try:
+        return get_embeddings(texts)
+    except Exception as e:
+        logger.error(f"Error encoding batch: {str(e)}")
+        raise
+
+def store_text_chunks(chunks: List[Dict[str, Any]]) -> Dict[str, Any]:
     """
     Stores text chunks in ChromaDB along with their sentence embeddings.
 
-    Each chunk is embedded using a pre-trained SentenceTransformer model and added to the ChromaDB collection
-    with corresponding metadata and a unique ID.
-
     Args:
-        chunks (list of dict): List of dictionaries containing:
-            - 'content' (str): Text content of the chunk.
-            - 'meta' (dict): Metadata dictionary containing at least the 'source' (filename or origin).
+        chunks (List[Dict]): List of dictionaries containing:
+            - 'content' (str): Text content of the chunk
+            - 'meta' (Dict): Metadata dictionary with at least 'source' (filename/origin)
 
     Returns:
-        dict: Dictionary containing status and number of chunks stored or an error message.
+        Dict: Status of the storage operation
     """
     try:
-        # Get current number of stored documents to generate unique IDs
+        if not chunks:
+            return {"status": "error", "message": "No chunks provided"}
+
+        # Get current collection size for ID generation
         current_size = len(collection.get()['ids'])
+        
+        # Prepare batch data
+        contents = [chunk['content'] for chunk in chunks]
+        metadatas = [chunk['meta'] for chunk in chunks]
+        ids = [f"chunk_{current_size + i}" for i in range(len(chunks))]
 
-        # Loop through each chunk to embed and store
-        for i, chunk in enumerate(chunks):
-            embedding = model.encode(chunk['content']).tolist()
+        # Process in batches
+        total_chunks = len(chunks)
+        processed = 0
+        batch_size = settings.BATCH_SIZE
 
-            # Add the chunk with its embedding, metadata, and ID
-            collection.add(
-                documents=[chunk['content']],
-                embeddings=[embedding],
-                metadatas=[chunk['meta']],
-                ids=[f"chunk_{current_size + i}"]
-            )
+        while processed < total_chunks:
+            batch_end = min(processed + batch_size, total_chunks)
+            batch_slice = slice(processed, batch_end)
             
+            batch_contents = contents[batch_slice]
+            batch_metadatas = metadatas[batch_slice]
+            batch_ids = ids[batch_slice]
 
-        return {"status": "success", "message": f"{len(chunks)} chunks stored."}
+            # Generate embeddings for the batch using OpenAI
+            try:
+                batch_embeddings = get_embeddings(batch_contents)
+            except Exception as e:
+                logger.error(f"Error generating embeddings for batch: {str(e)}")
+                return {"status": "error", "message": f"OpenAI embedding generation failed: {str(e)}"}
+
+            # Add to ChromaDB
+            try:
+                # Convert embeddings to numpy array for ChromaDB
+                embeddings_array = np.array([np.array(emb, dtype=np.float64) for emb in batch_embeddings])
+                collection.add(
+                    embeddings=embeddings_array.tolist(),  # ChromaDB expects List[List[float]]
+                    documents=batch_contents,
+                    metadatas=batch_metadatas,
+                    ids=batch_ids
+                )
+                processed += len(batch_contents)
+                logger.info(f"Processed {processed}/{total_chunks} chunks")
+            
+            except Exception as e:
+                logger.error(f"Error adding batch to ChromaDB: {str(e)}")
+                return {"status": "error", "message": f"ChromaDB storage failed: {str(e)}"}
+
+        return {
+            "status": "success",
+            "message": f"Successfully stored {total_chunks} chunks",
+            "chunks_stored": total_chunks
+        }
 
     except Exception as e:
-        return {"status": "error", "message": f"Failed to store chunks: {str(e)}"}
+        logger.error(f"Error in store_text_chunks: {str(e)}")
+        return {"status": "error", "message": str(e)}
 
+# Alias for backward compatibility
+def search_similar(query_text: str, n_results: int = 5) -> List[Dict[str, Any]]:
+    return query_similar_chunks(query_text, n_results)
 
-# def search_similar(query, k=5, source=None):
-#     """
-#     Searches the ChromaDB collection for the top-k most semantically similar documents to a given query.
-
-#     The function encodes the query using the same SentenceTransformer model used for storage, retrieves
-#     the top-k most relevant documents, and returns both their content and metadata along with similarity scores.
-
-#     Args:
-#         query (str): The user's input query for semantic search.
-#         k (int, optional): Number of top results to return. Defaults to 5.
-#         source (str, optional): The source document to filter by. Defaults to None.
-
-#     Returns:
-#         list or dict: List of dictionaries with 'content', 'meta' (including similarity score), and
-#                      source information for each matched document, or an error dictionary in case of failure.
-#     """
-#     try:
-#         # Encode query to obtain its vector representation
-#         q_emb = model.encode(query).tolist()
-
-#         # Query the ChromaDB collection for top-k matches
-#         query_params = {
-#             "query_embeddings": [q_emb],
-#             "n_results": k,
-#             "include": ['documents', 'metadatas', 'distances']
-#         }
-#         if source:
-#             query_params["where"] = {"source": source}
-        
-#         results = collection.query(**query_params)
-#         print(f"Query: {query}")
-        
-#         # Safely extract results
-#         if not results or not isinstance(results, dict):
-#             return {"status": "error", "message": "Search failed: no results returned"}
-            
-#         if 'documents' not in results or not results['documents'] or not results['documents'][0]:
-#             return {"status": "error", "message": "No matching documents found"}
-            
-#         documents = results['documents'][0]
-#         distances = []
-#         metadatas = []
-        
-#         if 'distances' in results and results['distances']:
-#             distances = results['distances'][0]
-#         if 'metadatas' in results and results['metadatas']:
-#             metadatas = results['metadatas'][0]
-            
-#         print(f"Found {len(documents)} matches")
-        
-#         # Convert distances to similarity scores and prepare results
-#         results_list = []
-#         for i, doc in enumerate(documents):
-#             # Calculate similarity score (0 to 1 scale)
-#             # similarity = 0.5  # Default mid-range similarity
-#             # if distances:
-#             #     max_distance = max(distances)
-#             #     if max_distance > 0:
-#             #         similarity = 1.0 - (distances[i] / max_distance)
-
-#             # NEW (use cosine similarity directly)
-#          similarity = 1.0 - distances[i] if distances else 0.0
-
-#             # Get metadata
-#         meta = metadatas[i] if i < len(metadatas) else {}
-#         if not isinstance(meta, dict):
-#                 meta = {}
-            
-#             # Create result entry
-#         result = {
-#                 "content": doc,
-#                 "meta": {
-#                     "source": meta.get("source", "unknown"),
-#                     "similarity": similarity
-#                 }
-#             }
-#         results_list.append(result)
-#         print(f"Document {i+1} similarity: {similarity}")
-        
-#         if not results_list:
-#             return {"status": "error", "message": "No relevant content found for the query."}
-            
-#         # Sort by similarity
-#         results_list.sort(key=lambda x: x["meta"]["similarity"], reverse=True)
-#         return results_list
-
-#     except Exception as e:
-#         return {"status": "error", "message": f"Search failed: {str(e)}"}
-
-# def search_similar(query, k=5, source=None, min_similarity: float = 0.3):
-def search_similar(query, k=5, source=None, ):
+def query_similar_chunks(query_text: str, n_results: int = 5) -> List[Dict[str, Any]]:
     """
-    Searches the ChromaDB collection for the top-k most semantically similar documents to a given query.
-
+    Query the vector store for chunks similar to the input text.
+    
     Args:
-        query (str): The user's input query.
-        k (int, optional): Number of top results to return. Defaults to 5.
-        source (str, optional): Filter by document source. Defaults to None.
-        min_similarity (float, optional): Minimum similarity threshold (0–1). Defaults to 0.3.
-
+        query_text (str): The text to find similar chunks for
+        n_results (int): Number of results to return
+        
     Returns:
-        list or dict: List of dicts with 'content' and 'meta' (source + similarity).
+        List[Dict]: List of similar chunks with their metadata and similarity scores
     """
     try:
-        # Encode query
-        q_emb = model.encode(query).tolist()
-
-        # Query Chroma
-        query_params = {
-            "query_embeddings": [q_emb],
-            "n_results": k,
-            "include": ["documents", "metadatas", "distances"]
-        }
-        if source:
-            query_params["where"] = {"source": source}
+        # Generate query embedding using OpenAI
+        query_embedding = get_embeddings([query_text])[0]
         
-        results = collection.query(**query_params)
-        print(f"Query: {query}")
+        # Query the collection
+        try:
+            results = collection.query(
+                query_embeddings=[query_embedding],
+                n_results=n_results,
+                include=["documents", "metadatas", "distances"]
+            )
+        except Exception as e:
+            logger.error(f"ChromaDB query failed: {str(e)}")
+            return []
+
+        # Format results
+        formatted_results = []
+        try:
+            if results and isinstance(results, dict):
+                # Safely get results
+                ids_list = results.get('ids', [])
+                docs_list = results.get('documents', [])
+                meta_list = results.get('metadatas', [])
+                dist_list = results.get('distances', [])
+
+                if ids_list and len(ids_list) > 0:
+                    ids = ids_list[0]
+                    documents = docs_list[0] if docs_list else []
+                    metadatas = meta_list[0] if meta_list else []
+                    distances = dist_list[0] if dist_list else []
+
+                    for i in range(len(ids)):
+                        formatted_results.append({
+                            "content": documents[i] if i < len(documents) else "",
+                            "metadata": metadatas[i] if i < len(metadatas) else {},
+                            "similarity": 1 - float(distances[i]) if i < len(distances) else 0.0
+                        })
+        except Exception as e:
+            logger.error(f"Error formatting results: {str(e)}")
+            return []
+            
+        return formatted_results
         
-        if not results or not isinstance(results, dict):
-            return {"status": "error", "message": "Search failed: no results returned"}
-            
-        if not results.get("documents") or results["documents"] is None or not results["documents"][0]:
-            return {"status": "error", "message": "No matching documents found"}
-            
-        documents = results["documents"][0]
-        distances = results.get("distances")
-        if distances is not None and len(distances) > 0:
-            distances = distances[0]
-        else:
-            distances = []
-        metadatas = results.get("metadatas")
-        if metadatas is not None and len(metadatas) > 0:
-            metadatas = metadatas[0]
-        else:
-            metadatas = []        
-        print(f"Found {len(documents)} matches")
-
-        results_list = []
-        for i, doc in enumerate(documents):
-            similarity = 1.0 - distances[i] if distances else 0.0
-
-            # 🔑 Apply minimum similarity filter
-            # if similarity < min_similarity:
-            #     print(f"Skipping document {i+1}: similarity {similarity:.3f} below threshold {min_similarity}")
-            #     continue
-
-            meta = metadatas[i] if i < len(metadatas) else {}
-            if not isinstance(meta, dict):
-                meta = {}
-
-            result = {
-                "content": doc,
-                "meta": {
-                    "source": meta.get("source", "unknown"),
-                    "similarity": similarity
-                }
-            }
-            results_list.append(result)
-            print(f"Document {i+1} similarity: {similarity:.3f}")
-        
-        if not results_list:
-            return {"status": "error", "message": "No relevant content found for the query."}
-            
-        # Sort by similarity (high → low)
-        results_list.sort(key=lambda x: x["meta"]["similarity"], reverse=True)
-        return results_list
-
     except Exception as e:
-        return {"status": "error", "message": f"Search failed: {str(e)}"}
+        logger.error(f"Error querying vector store: {str(e)}")
+        return []

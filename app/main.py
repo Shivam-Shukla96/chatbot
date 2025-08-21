@@ -1,7 +1,7 @@
 from fastapi import FastAPI, UploadFile, File, HTTPException
-from app.api.routes.upload import upload_router
-from app.api.routes.query import query_router
-from app.api.routes.theme import theme_router
+from .api.routes.upload import upload_router
+from .api.routes.query import query_router
+from .api.routes.theme import theme_router
 
 app = FastAPI(title="Document Chatbot")
 from fastapi.middleware.cors import CORSMiddleware

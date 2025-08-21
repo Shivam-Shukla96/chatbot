@@ -1,17 +1,27 @@
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
-from app.services.vector_store import search_similar
-# from app.services.synthesis import summarize_themes
 from typing import Optional
 import os
+import logging
 from dotenv import load_dotenv
 from openai import OpenAI
+from ...services.search import search_similar
+from ...services.synthesis import summarize_themes
+
+# Configure logging
+logger = logging.getLogger(__name__)
 
 # Load environment variables
 load_dotenv()
 
 # Initialize OpenAI client with API key from environment
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+api_key = os.getenv("OPENAI_API_KEY")
+if not api_key:
+    raise ValueError("OPENAI_API_KEY environment variable is not set")
+client = OpenAI(
+    api_key=api_key,
+    base_url="https://api.openai.com/v1"
+)
 
 query_router = APIRouter()
 
@@ -38,15 +48,7 @@ def ask_question(q: str, source: Optional[str] = None):
         
         # After getting results
         context = "\n".join([r["content"] for r in results])
-        completion = client.chat.completions.create(
-            model="gpt-4o-mini",   # or gpt-4-turbo / gpt-3.5-turbo
-            messages=[
-                {"role": "system", "content": "You are a helpful assistant. Answer the question based only on the provided context."},
-                {"role": "user", "content": f"Question: {q}\n\nContext:\n{context}"}
-            ],
-            temperature=0.3
-        )
-        summary = completion.choices[0].message.content
+        summary = summarize_themes(results, query=q)
 
         # Pass both results and original query for context-aware summarization
         # summary = summarize_themes(results, query=q)

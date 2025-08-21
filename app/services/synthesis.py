@@ -1,126 +1,133 @@
-from transformers.pipelines import pipeline
-from typing import List, Dict, Union, Any
+import os
+import logging
+import re
+from typing import List, Dict, Union, Any, Optional
+from dotenv import load_dotenv
+from openai import OpenAI
 
-# summarizer = pipeline("summarization", model="facebook/bart-large-cnn")  # Better model for our use case
-# summarizer = pipeline("summarization", model="t5-base")
-# NEW (stronger summarizer)
-summarizer = pipeline("summarization", model="facebook/bart-large-cnn")
+# Configure logging
+logger = logging.getLogger(__name__)
 
+# Load environment variables
+load_dotenv()
 
-ChunkType = Dict[str, Union[str, Dict[str, Any]]]
+# Initialize OpenAI client
+try:
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        raise ValueError("OPENAI_API_KEY environment variable is not set")
+    client = OpenAI(api_key=api_key)
+except Exception as e:
+    logger.error(f"Error initializing OpenAI client: {str(e)}")
+    raise
 
-def summarize_themes(chunks: Union[List[ChunkType], Dict[str, str]], query: str = "") -> str:
+# Type alias for chunk structure
+ChunkType = Dict[str, Any]
+
+def format_response(text: str) -> str:
     """
-    Summarizes themes across a list of document chunks using Hugging Face summarization models.
-
+    Format the response text to ensure proper line breaks and readability.
+    
     Args:
-        chunks (Union[List[Dict[str, str]], Dict[str, str]]): List of text chunks with keys 'content' and 'meta',
-            or an error dictionary with 'status' and 'message'.
-        query (str, optional): The original query to provide context for summarization.
-
+        text: The text to format
+        
     Returns:
-        str: Combined summary of the input texts or an error message.
+        str: Formatted text with proper line breaks
+    """
+    if not text:
+        return text
+        
+    # Split into sentences and clean up
+    sentences = re.split(r'(?<=[.!?])\s+', text)
+    sentences = [s.strip() for s in sentences if s.strip()]
+    
+    # Add line breaks between sentences
+    formatted = "\n".join(sentences)
+    
+    # Ensure bullet points are on new lines
+    formatted = re.sub(r'(?<!\n)•', '\n•', formatted)
+    
+    # Clean up multiple newlines
+    formatted = re.sub(r'\n{3,}', '\n\n', formatted)
+    
+    return formatted.strip()
+
+def summarize_themes(results: List[ChunkType], query: str) -> str:
+    """
+    Synthesize search results into a coherent answer using GPT.
+    
+    Args:
+        results: List of search results with content and metadata
+        query: The original user query
+        
+    Returns:
+        str: Synthesized answer based on the search results
     """
     try:
-        # Handle error case
-        if isinstance(chunks, dict):
-            if chunks.get("status") == "error":
-                return chunks.get("message", "Unknown error occurred")
-            return "Invalid input format"
-
-        if not isinstance(chunks, list):
-            return "Invalid input: expected a list of chunks"
-
-        # Extract and validate text chunks
-        valid_chunks = [c for c in chunks if isinstance(c, dict) and 'content' in c]
-        print(f"Summarizing {len(valid_chunks)} valid chunks of text.")
-        if not valid_chunks:
-            return "No valid content found to summarize."
-
-        # Sort chunks by similarity if available
-        chunks_with_scores = []
-        for chunk in valid_chunks:
-            meta = chunk.get('meta', {})
-            if isinstance(meta, dict):
-                similarity = meta.get('similarity', 0)
-                print(f"Processing chunk with similarity: {similarity}")  # Debug info
-            else:
-                similarity = 0
-                print("Chunk has no similarity score")
-            chunks_with_scores.append((chunk, similarity))
-        
-        chunks_with_scores.sort(key=lambda x: x[1], reverse=True)
-        print(f"Sorted {len(chunks_with_scores)} chunks by similarity")
-
-        # Prepare context-aware prompt
+        if not results:
+            return "No relevant information found."
+            
+        # Combine relevant chunks into context
         context_parts = []
-        min_similarity = 0.1  # Lower threshold to include more content
-        for chunk, score in chunks_with_scores:
-            print(f"Evaluating chunk with similarity {score}")
-            if score >= min_similarity:
-                context_parts.append(chunk['content'])
-                print(f"Including chunk with similarity: {score}")
-            else:
-                print(f"Skipping chunk with low similarity: {score}")
-                
-        if not context_parts and chunks_with_scores:  # If no chunks meet threshold, take the best one
-            best_chunk = chunks_with_scores[0]
-            context_parts.append(best_chunk[0]['content'])
-            print(f"Including best chunk with similarity: {best_chunk[1]}")
+        for chunk in results:
+            try:
+                meta = chunk.get('meta', {})
+                if isinstance(meta, dict):
+                    source = meta.get('source', 'unknown source')
+                    content = chunk.get('content', '')
+                    if content:
+                        context_parts.append(f"From {source}:\n{content}")
+            except Exception as e:
+                logger.warning(f"Error processing chunk: {e}")
+                continue
         
         if not context_parts:
-            return "No relevant content found for the query."
-
-        context = "\n".join(context_parts)
-        if query:
-            prompt = f"Question: {query}\n\nRelevant information:\n{context}\n\nAnswer:"
-        else:
-            prompt = f"Summarize the following information:\n{context}"
-
-        # Process text in chunks suitable for the model
-        max_chunk_chars = 500  # Reduced for better handling
-        text_parts = []
+            return "Could not process any of the search results."
+            
+        context = "\n\n".join(context_parts)
         
-        # Split text while trying to maintain sentence boundaries
-        sentences = prompt.replace('\n', ' ').split('.')
-        current_chunk = ""
+        # Create system prompt
+        system_prompt = (
+            "You are a helpful assistant. Follow these rules strictly:\n"
+            "1. Answer based only on the provided context.\n"
+            "2. Start each new sentence on a new line.\n"
+            "3. Keep answers concise and to the point.\n"
+            "4. If information is not in the context, say 'I don't have enough information.'\n"
+            "5. Use bullet points for lists.\n"
+            "6. Maintain a professional tone."
+        )
         
-        for sentence in sentences:
-            if len(current_chunk) + len(sentence) > max_chunk_chars and current_chunk:
-                text_parts.append(current_chunk.strip())
-                current_chunk = sentence
-            else:
-                current_chunk += sentence + "."
-        
-        if current_chunk:
-            text_parts.append(current_chunk.strip())
-        
-        print(f"Split into {len(text_parts)} parts for summarization.")
-
-        # Process each part
-        summaries = []
-        for part in text_parts:
-            if len(part.split()) < 10:  # Skip very short segments
-                continue
-            try:
-                summary = summarizer(
-                    part,
-                    max_length=150,
-                    min_length=30,
-                    do_sample=False,
-                    truncation=True
+        # Get completion from OpenAI
+        try:
+            completion = client.chat.completions.create(
+                model="gpt-3.5-turbo",  # Using faster model for better response time
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": f"Question: {query}\n\nContext:\n{context}"}
+                ],
+                temperature=0.3,
+                max_tokens=500,  # Reduced for faster response
+                presence_penalty=0.1,  # Slight penalty for repetition
+                frequency_penalty=0.1   # Slight penalty for repetition
+            )
+            
+            answer = completion.choices[0].message.content
+            if answer is None:
+                return "Error: No response generated"
+                
+            # Format the response with proper line breaks
+            return format_response(answer)
+            
+        except Exception as gpt_error:
+            logger.error(f"Error calling OpenAI API: {str(gpt_error)}")
+            # Fallback to a simpler response using the most relevant chunk
+            if results:
+                return format_response(
+                    f"API Error. Here's the most relevant excerpt:\n\n"
+                    f"{results[0].get('content', 'No content available')}"
                 )
-                if summary and isinstance(summary, list) and len(summary) > 0:
-                    summaries.append(summary[0]['summary_text'])
-            except Exception as e:
-                print(f"Error summarizing part: {str(e)}")
+            return "Error generating response and no fallback content available."
         
-        print(f"Generated {len(summaries)} summaries.")
-        if not summaries:
-            print("No summaries generated.")
-            return "No summaries generated."
-
-        return "\n".join(summaries)
-
     except Exception as e:
-        return f"Summarization failed: {str(e)}"
+        logger.error(f"Error in summarize_themes: {str(e)}")
+        return f"Error generating summary: {str(e)}"
