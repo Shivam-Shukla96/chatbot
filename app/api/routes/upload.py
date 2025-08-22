@@ -19,7 +19,7 @@ upload_router = APIRouter()
 
 # Constants
 MAX_FILE_SIZE = 50 * 1024 * 1024  # 50MB
-ALLOWED_EXTENSIONS = {'.pdf', '.txt', '.doc', '.docx'}
+ALLOWED_EXTENSIONS = {'.pdf', '.txt', '.doc', '.docx', '.jpg', '.png'}
 CHUNK_SIZE = 50000
 
 def is_valid_file(file: UploadFile) -> bool:

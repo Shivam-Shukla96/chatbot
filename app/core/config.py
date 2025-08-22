@@ -21,12 +21,12 @@ class Settings(BaseSettings):
     MAX_CHUNK_SIZE: int = config.getint('DEFAULT', 'MAX_CHUNK_SIZE', fallback=50000)
     MAX_FILE_SIZE: int = config.getint('DEFAULT', 'MAX_FILE_SIZE', fallback=52428800)
     
-    # OpenAI
-    OPENAI_API_KEY: str = os.getenv('OPENAI_API_KEY', '')
-    OPENAI_MODEL: str = config.get('OpenAI', 'MODEL', fallback='gpt-4-turbo')
-    OPENAI_MAX_TOKENS: int = config.getint('OpenAI', 'MAX_TOKENS', fallback=1000)
-    OPENAI_TEMPERATURE: float = config.getfloat('OpenAI', 'TEMPERATURE', fallback=0.3)
-    
+    # GROQ
+    GROQ_API_KEY: str = os.getenv('GROQ_API_KEY', '')
+    GROQ_MODEL: str = config.get('GROQ', 'MODEL_NAME', fallback='mixtral-8x7b-instruct')
+    GROQ_MAX_TOKENS: int = config.getint('GROQ', 'MAX_TOKENS', fallback=8192)
+    GROQ_TEMPERATURE: float = config.getfloat('GROQ', 'TEMPERATURE', fallback=0.3)
+
     # Vector DB
     EMBEDDING_MODEL: str = config.get('VectorDB', 'EMBEDDING_MODEL', fallback='all-MiniLM-L6-v2')
     BATCH_SIZE: int = config.getint('VectorDB', 'BATCH_SIZE', fallback=32)

@@ -8,23 +8,26 @@ It supports storing document chunks along with metadata and querying the most se
 import os
 import logging
 import chromadb
-from openai import OpenAI
+from groq import Groq
 from typing import List, Dict, Any, Optional, Union
 from concurrent.futures import ThreadPoolExecutor
 import numpy as np
 from app.core.config import settings
 from dotenv import load_dotenv
+from sentence_transformers import SentenceTransformer
 
 # Load environment variables
 load_dotenv()
 
-# Get OpenAI API key
-api_key = os.getenv("OPENAI_API_KEY")
+# Get GROQ API key
+api_key = os.getenv("GROQ_API_KEY")
 if not api_key:
-    raise ValueError("OPENAI_API_KEY environment variable is not set")
+    raise ValueError("GROQ_API_KEY environment variable is not set")
 
 # Configure logging
 logger = logging.getLogger(__name__)
+embedder = SentenceTransformer("all-MiniLM-L6-v2")
+
 
 def initialize_vector_store():
     """Initialize ChromaDB client with error handling"""
@@ -52,7 +55,7 @@ client, collection = initialize_vector_store()
 Embedding = List[float]
 
 def get_embeddings(texts: List[str]) -> List[List[float]]:
-    """Get embeddings using OpenAI's API"""
+    """Get embeddings using Sentence Transformers  """
     try:
         if not texts:
             return []
@@ -62,23 +65,26 @@ def get_embeddings(texts: List[str]) -> List[List[float]]:
             texts = [texts]
             
         # Clean and validate inputs
-        validated_texts = [str(text).strip() for text in texts]
+        validated_texts = [str(text).strip() for text in texts if str(text).strip()]
         if not any(validated_texts):
             logger.warning("No valid text to embed after cleaning")
             return []
             
-        # Create OpenAI client
+        # Create GROQ client
         if not api_key:
-            raise ValueError("OpenAI API key is not set")
-        client = OpenAI(api_key=api_key)
-            
-        # Get embeddings from OpenAI
-        response = client.embeddings.create(
-            model="text-embedding-ada-002",
-            input=validated_texts
-        )
-        # Extract embeddings from response
-        embeddings = [data.embedding for data in response.data]
+            raise ValueError("GROQ API key is not set")
+        client = Groq(api_key=api_key)
+
+        # Get embeddings from GROQ
+        # response = client.embeddings.create(
+        #     model="text-embedding-ada-002",
+        #     input=validated_texts
+        # )
+        # Load model once globally (do this at top of file)
+        embedder = SentenceTransformer("all-MiniLM-L6-v2")  # lightweight, fast model
+
+# Instead of calling Groq
+        embeddings = embedder.encode(validated_texts, convert_to_tensor=False).tolist()
         return embeddings
     except Exception as e:
         logger.error(f"Error getting embeddings from OpenAI: {str(e)}")

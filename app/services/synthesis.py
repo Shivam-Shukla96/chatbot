@@ -3,7 +3,7 @@ import logging
 import re
 from typing import List, Dict, Union, Any, Optional
 from dotenv import load_dotenv
-from openai import OpenAI
+from groq import Groq
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -11,14 +11,14 @@ logger = logging.getLogger(__name__)
 # Load environment variables
 load_dotenv()
 
-# Initialize OpenAI client
+# Initialize GROQ client
 try:
-    api_key = os.getenv("OPENAI_API_KEY")
+    api_key = os.getenv("GROQ_API_KEY")
     if not api_key:
-        raise ValueError("OPENAI_API_KEY environment variable is not set")
-    client = OpenAI(api_key=api_key)
+        raise ValueError("GROQ_API_KEY environment variable is not set")
+    client = Groq(api_key=api_key)
 except Exception as e:
-    logger.error(f"Error initializing OpenAI client: {str(e)}")
+    logger.error(f"Error initializing GROQ client: {str(e)}")
     raise
 
 # Type alias for chunk structure
@@ -97,10 +97,10 @@ def summarize_themes(results: List[ChunkType], query: str) -> str:
             "6. Maintain a professional tone."
         )
         
-        # Get completion from OpenAI
+        # Get completion from GROQ
         try:
             completion = client.chat.completions.create(
-                model="gpt-3.5-turbo",  # Using faster model for better response time
+                model="llama3-8b-8192",  # Using faster model for better response time
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": f"Question: {query}\n\nContext:\n{context}"}

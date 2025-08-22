@@ -4,7 +4,7 @@ from typing import Optional
 import os
 import logging
 from dotenv import load_dotenv
-from openai import OpenAI
+from groq import Groq
 from ...services.search import search_similar
 from ...services.synthesis import summarize_themes
 
@@ -14,13 +14,13 @@ logger = logging.getLogger(__name__)
 # Load environment variables
 load_dotenv()
 
-# Initialize OpenAI client with API key from environment
-api_key = os.getenv("OPENAI_API_KEY")
+# Initialize GROQ client with API key from environment
+api_key = os.getenv("GROQ_API_KEY")
 if not api_key:
-    raise ValueError("OPENAI_API_KEY environment variable is not set")
-client = OpenAI(
+    raise ValueError("GROQ_API_KEY environment variable is not set")
+client = Groq(
     api_key=api_key,
-    base_url="https://api.openai.com/v1"
+    base_url="https://api.groq.com/v1"
 )
 
 query_router = APIRouter()

@@ -13,10 +13,10 @@ def check_environment():
     """Check if all required environment variables and paths are set up correctly."""
     try:
         settings = get_settings()
-        
-        # Check OpenAI API key
-        if not os.getenv('OPENAI_API_KEY'):
-            logger.error("OPENAI_API_KEY environment variable is not set")
+
+        # Check GROQ API key
+        if not os.getenv('GROQ_API_KEY'):
+            logger.error("GROQ_API_KEY environment variable is not set")
             return False
             
         # Check directories
