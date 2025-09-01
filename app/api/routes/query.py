@@ -27,7 +27,7 @@ query_router = APIRouter()
 
 @query_router.get('/')
 def ask_question(q: str, source: Optional[str] = None):
-    print(f"Received query: {q}, source: {source}")
+    # print(f"Received query: {q}, source: {source}")
     try:
         results = search_similar(q, source=source)
         # print(f"Search results: {results}")
@@ -43,20 +43,18 @@ def ask_question(q: str, source: Optional[str] = None):
                 status_code=500,
                 content={"error": "Invalid format for search results."}
             )
-        print(f"Results---: {results}")
+        # print(f"Results---: {results}")
 
         
         # After getting results
         context = "\n".join([r["content"] for r in results])
         summary = summarize_themes(results, query=q)
 
-        # Pass both results and original query for context-aware summarization
-        # summary = summarize_themes(results, query=q)
-        print(f"Summary:>> {summary}")
+        # Only return sources once
         return {
             "question": q,
-            "answer": summary,
-            "sources": [{"source": r["meta"]["source"], "similarity": r["meta"].get("similarity", 0)} for r in results]
+            "answer": summary["answer"],
+            "sources": summary["sources"]
         }
     except Exception as ex:
         return JSONResponse(

@@ -18,13 +18,13 @@ class Settings(BaseSettings):
     CHROMA_DB_PATH: Path = Path(config.get('DEFAULT', 'CHROMA_DB_PATH', fallback='chroma_db'))
     
     # File processing
-    MAX_CHUNK_SIZE: int = config.getint('DEFAULT', 'MAX_CHUNK_SIZE', fallback=50000)
+    MAX_CHUNK_SIZE: int = 800
     MAX_FILE_SIZE: int = config.getint('DEFAULT', 'MAX_FILE_SIZE', fallback=52428800)
     
     # GROQ
     GROQ_API_KEY: str = os.getenv('GROQ_API_KEY', '')
-    GROQ_MODEL: str = config.get('GROQ', 'MODEL_NAME', fallback='mixtral-8x7b-instruct')
-    GROQ_MAX_TOKENS: int = config.getint('GROQ', 'MAX_TOKENS', fallback=8192)
+    GROQ_MODEL: str = config.get('GROQ', 'MODEL_NAME', fallback='qwen/qwen3-32b')
+    GROQ_MAX_TOKENS: int = config.getint('GROQ', 'MAX_TOKENS', fallback=800)
     GROQ_TEMPERATURE: float = config.getfloat('GROQ', 'TEMPERATURE', fallback=0.3)
 
     # Vector DB

@@ -2,11 +2,13 @@ import os
 import hashlib
 import logging
 import asyncio
+import re
 from typing import List, Dict, Any
 from fastapi import APIRouter, UploadFile, File, HTTPException
 from fastapi.responses import JSONResponse
 from ...services.ocr_service import extract_text_from_file
 from ...services.vector_store import store_text_chunks
+from app.core.config import settings  # Correct import for settings
 
 # Configure logging
 logging.basicConfig(
@@ -20,7 +22,7 @@ upload_router = APIRouter()
 # Constants
 MAX_FILE_SIZE = 50 * 1024 * 1024  # 50MB
 ALLOWED_EXTENSIONS = {'.pdf', '.txt', '.doc', '.docx', '.jpg', '.png'}
-CHUNK_SIZE = 50000
+CHUNK_SIZE = 800  # Use fixed chunk size for all files
 
 def is_valid_file(file: UploadFile) -> bool:
     """
@@ -43,23 +45,65 @@ def get_file_hash(content: bytes) -> str:
     """
     return hashlib.sha256(content).hexdigest()
 
-def chunk_text(text: str, source: str, chunk_size: int = CHUNK_SIZE) -> List[Dict[str, Any]]:
+def chunk_text(text: str, source: str, chunk_size: int = CHUNK_SIZE, overlap: int = 20) -> List[Dict[str, Any]]:
     """
-    Splits extracted text into chunks with metadata.
+    Splits extracted text into sentence-based chunks with overlap for better semantic retrieval.
+    Each chunk is ~chunk_size words, but never splits a sentence. Overlap is in sentences.
     """
     try:
-        words = text.split()
+        # Split by paragraphs first
+        paragraphs = [p.strip() for p in text.split('\n') if p.strip()]
         chunks = []
-        for i in range(0, len(words), chunk_size):
-            chunk = " ".join(words[i:i+chunk_size])
-            chunks.append({
-                "content": chunk,
-                "meta": {
-                    "source": source,
-                    "chunk_index": i // chunk_size,
-                    "total_chunks": (len(words) + chunk_size - 1) // chunk_size
+        chunk_index = 0
+        for para in paragraphs:
+            # Split paragraph into sentences
+            sentences = re.split(r'(?<=[.!?]) +', para)
+            current_chunk = []
+            current_len = 0
+            i = 0
+            while i < len(sentences):
+                sentence = sentences[i]
+                words = sentence.split()
+                if current_len + len(words) <= chunk_size or not current_chunk:
+                    current_chunk.append(sentence)
+                    current_len += len(words)
+                    i += 1
+                else:
+                    chunk = " ".join(current_chunk)
+                    chunk_dict = {
+                        "content": chunk,
+                        "meta": {
+                            "source": source,
+                            "chunk_index": chunk_index,
+                            "total_chunks": None  # Set later
+                        }
+                    }
+                    chunks.append(chunk_dict)
+                    chunk_index += 1
+                    # Overlap: start next chunk with last N sentences
+                    current_chunk = current_chunk[-2:] if 2 > 0 else []
+                    current_len = sum(len(s.split()) for s in current_chunk)
+            # Add last chunk in paragraph
+            if current_chunk:
+                chunk = " ".join(current_chunk)
+                chunk_dict = {
+                    "content": chunk,
+                    "meta": {
+                        "source": source,
+                        "chunk_index": chunk_index,
+                        "total_chunks": None
+                    }
                 }
-            })
+                chunks.append(chunk_dict)
+                chunk_index += 1
+        # Set total_chunks meta
+        for c in chunks:
+            c["meta"]["total_chunks"] = len(chunks)
+        # Log only summary info, not content
+        if chunks:
+            logger.info(f"Chunked {source}: {len(chunks)} chunks. First chunk preview: '{chunks[0]['content'][:20]}...'")
+        else:
+            logger.info(f"Chunked {source}: No chunks created.")
         return chunks
     except Exception as e:
         logger.error(f"Error chunking text from {source}: {str(e)}")
@@ -136,7 +180,8 @@ async def process_single_file(file: UploadFile) -> Dict[str, Any]:
 
         # Store chunks
         result = store_text_chunks(text_chunks)
-        
+        # Only log summary, not content
+        logger.info(f"Processed file {file.filename}: {len(text_chunks)} chunks stored.")
         return {
             "filename": file.filename,
             "status": "success",

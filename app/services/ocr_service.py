@@ -7,6 +7,7 @@ from PyPDF2 import PdfReader
 from typing import List, Union
 import logging
 from pathlib import Path
+import re
 
 # Configure logging with proper format
 logging.basicConfig(
@@ -192,17 +193,16 @@ def extract_text_from_file(file_path: str) -> Union[str, List[dict]]:
         logger.error(f"Extraction failed for {file_path}: {str(e)}")
         return f"Text extraction failed: {str(e)}"
 
-def chunk_text(text: str, max_tokens: int = 300) -> List[dict]:
+def chunk_text(text: str, max_tokens: int = 800) -> List[dict]:
     """
     Splits a large block of text into smaller paragraph-based chunks.
-
-    Args:
-        text (str): The raw extracted text to be chunked.
-        max_tokens (int): Placeholder for future token-based chunking. Currently unused.
-
-    Returns:
-        List[dict]: List of dictionaries containing individual paragraph chunks
-                    with metadata.
+    Converts every new line in a paragraph to a bullet point for cleaner downstream responses.
     """
     paragraphs = text.split("\n\n")
-    return [{"content": p.strip(), "meta": {"source": "upload"}} for p in paragraphs if p.strip()]
+    cleaned_chunks = []
+    for p in paragraphs:
+        # Replace all newlines with bullet points
+        bulletified = '\n'.join([f'- {line.strip()}' for line in p.strip().split('\n') if line.strip()])
+        if bulletified:
+            cleaned_chunks.append({"content": bulletified, "meta": {"source": "upload"}})
+    return cleaned_chunks

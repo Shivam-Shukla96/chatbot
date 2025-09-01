@@ -77,7 +77,7 @@ def get_embeddings(texts: List[str]) -> List[List[float]]:
 
         # Get embeddings from GROQ
         # response = client.embeddings.create(
-        #     model="text-embedding-ada-002",
+        # model="text-embedding-ada-002",
         #     input=validated_texts
         # )
         # Load model once globally (do this at top of file)
@@ -162,6 +162,7 @@ def store_text_chunks(chunks: List[Dict[str, Any]]) -> Dict[str, Any]:
                 )
                 processed += len(batch_contents)
                 logger.info(f"Processed {processed}/{total_chunks} chunks")
+                 
             
             except Exception as e:
                 logger.error(f"Error adding batch to ChromaDB: {str(e)}")
@@ -171,17 +172,20 @@ def store_text_chunks(chunks: List[Dict[str, Any]]) -> Dict[str, Any]:
             "status": "success",
             "message": f"Successfully stored {total_chunks} chunks",
             "chunks_stored": total_chunks
+            
         }
+        print("total_chunks", total_chunks)
+        print("processed", processed, "unprocessed", total_chunks - processed)
 
     except Exception as e:
         logger.error(f"Error in store_text_chunks: {str(e)}")
         return {"status": "error", "message": str(e)}
 
 # Alias for backward compatibility
-def search_similar(query_text: str, n_results: int = 5) -> List[Dict[str, Any]]:
+def search_similar(query_text: str, n_results: int = 10) -> List[Dict[str, Any]]:
     return query_similar_chunks(query_text, n_results)
 
-def query_similar_chunks(query_text: str, n_results: int = 5) -> List[Dict[str, Any]]:
+def query_similar_chunks(query_text: str, n_results: int = 10) -> List[Dict[str, Any]]:
     """
     Query the vector store for chunks similar to the input text.
     

@@ -10,7 +10,7 @@ from .vector_store import query_similar_chunks
 
 logger = logging.getLogger(__name__)
 
-def search_similar(query: str, source: Optional[str] = None, n_results: int = 5) -> List[Dict[str, Any]] | Dict[str, str]:
+def search_similar(query: str, source: Optional[str] = None, n_results: int = 10) -> List[Dict[str, Any]] | Dict[str, str]:
     """
     Search for similar content in the vector store.
     
@@ -25,6 +25,7 @@ def search_similar(query: str, source: Optional[str] = None, n_results: int = 5)
     try:
         # Get similar chunks from vector store
         results = query_similar_chunks(query, n_results=n_results)
+        print("results", results)   
         
         if not results:
             logger.warning(f"No results found for query: {query}")
@@ -37,6 +38,16 @@ def search_similar(query: str, source: Optional[str] = None, n_results: int = 5)
                 if r.get("metadata", {}).get("source", "").lower() == source.lower()
             ]
             
+        # Deduplicate by content
+        seen = set()
+        deduped_results = []
+        for result in results:
+            content = result.get("content", "")
+            if content not in seen:
+                seen.add(content)
+                deduped_results.append(result)
+        results = deduped_results
+
         # Format results
         formatted_results = []
         for result in results:
@@ -55,4 +66,5 @@ def search_similar(query: str, source: Optional[str] = None, n_results: int = 5)
         
     except Exception as e:
         logger.error(f"Error in search_similar: {str(e)}")
+        print("Error in search_similar:", e)    
         return {"status": "error", "message": str(e)}
